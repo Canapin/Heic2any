@@ -83,6 +83,7 @@ export default definePlugin({
                     const heic: File[] = [];
                     const other: File[] = [];
                     for (const f of action.files) {
+                        if (!(f instanceof File)) { other.push(f); continue; }
                         (isHeic(f.type, f.name) ? heic : other).push(f);
                     }
                     if (other.length) origDispatch!({ ...action, files: other });
