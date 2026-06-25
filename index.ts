@@ -45,18 +45,20 @@ function isHeic(mimeType: string, filename: string) {
     return dot !== -1 && HEIC_EXTS.has(filename.slice(dot).toLowerCase());
 }
 
-async function convertFiles(files: File[]): Promise<File[]> {
-    return Promise.all(files.map(async f => {
-        if (!isHeic(f.type, f.name)) return f;
+async function convertItems(items: any[]): Promise<any[]> {
+    return Promise.all(items.map(async item => {
+        const file = item?.file ?? item;
+        if (!(file instanceof File) || !isHeic(file.type, file.name)) return item;
 
         try {
-            const result = await heic2any({ blob: f, toType: "image/jpeg" });
+            const result = await heic2any({ blob: file, toType: "image/jpeg" });
             const jpegBlob = Array.isArray(result) ? result[0] : result;
-            const newName = f.name.replace(/\.(heic|heif|heics|heifs)$/i, ".jpg");
-            return new File([jpegBlob], newName, { type: "image/jpeg" });
+            const newName = file.name.replace(/\.(heic|heif|heics|heifs)$/i, ".jpg");
+            const newFile = new File([jpegBlob], newName, { type: "image/jpeg" });
+            return item instanceof File ? newFile : { ...item, file: newFile };
         } catch (e) {
-            console.error("[HeicToJpeg] Failed to convert", f.name, e);
-            return f;
+            console.error("[HeicToJpeg] Failed to convert", file.name, e);
+            return item;
         }
     }));
 }
@@ -80,15 +82,16 @@ export default definePlugin({
                     action.type === UPLOAD &&
                     action.files?.length
                 ) {
-                    const heic: File[] = [];
-                    const other: File[] = [];
+                    const heic: any[] = [];
+                    const other: any[] = [];
                     for (const f of action.files) {
-                        if (!(f instanceof File)) { other.push(f); continue; }
-                        (isHeic(f.type, f.name) ? heic : other).push(f);
+                        const file = f?.file ?? f;
+                        if (!(file instanceof File)) { other.push(f); continue; }
+                        (isHeic(file.type, file.name) ? heic : other).push(f);
                     }
                     if (other.length) origDispatch!({ ...action, files: other });
                     if (heic.length) {
-                        convertFiles(heic).then(converted =>
+                        convertItems(heic).then(converted =>
                             origDispatch!({ ...action, files: converted })
                         );
                     }
