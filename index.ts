@@ -19,7 +19,7 @@
 import { definePluginSettings } from "@api/Settings";
 import { Devs } from "@utils/constants";
 import definePlugin, { OptionType } from "@utils/types";
-import { findLazy } from "@webpack";
+import { FluxDispatcher } from "@webpack/common";
 import heic2any from "heic2any";
 
 const settings = definePluginSettings({
@@ -45,28 +45,24 @@ function isHeic(mimeType: string, filename: string) {
     return dot !== -1 && HEIC_EXTS.has(filename.slice(dot).toLowerCase());
 }
 
-async function convert(upload: any) {
-    if (!isHeic(upload.mimeType, upload.filename)) return;
+async function convertFiles(files: File[]): Promise<File[]> {
+    return Promise.all(files.map(async f => {
+        if (!isHeic(f.type, f.name)) return f;
 
-    try {
-        const result = await heic2any({
-            blob: upload.item.file,
-            toType: "image/jpeg",
-        });
-
-        const jpegBlob = Array.isArray(result) ? result[0] : result;
-        const newName = upload.filename.replace(/\.(heic|heif|heics|heifs)$/i, ".jpg");
-        const jpegFile = new File([jpegBlob], newName, { type: "image/jpeg" });
-
-        upload.item.file = jpegFile;
-        upload.filename = newName;
-        upload.mimeType = "image/jpeg";
-    } catch (e) {
-        console.error("[HeicToJpeg] Failed to convert", upload.filename, e);
-    }
+        try {
+            const result = await heic2any({ blob: f, toType: "image/jpeg" });
+            const jpegBlob = Array.isArray(result) ? result[0] : result;
+            const newName = f.name.replace(/\.(heic|heif|heics|heifs)$/i, ".jpg");
+            return new File([jpegBlob], newName, { type: "image/jpeg" });
+        } catch (e) {
+            console.error("[HeicToJpeg] Failed to convert", f.name, e);
+            return f;
+        }
+    }));
 }
 
-let unpatch: (() => void) | null = null;
+const UPLOAD = "UPLOAD_ATTACHMENT_ADD_FILES";
+let origDispatch: ((action: any) => void) | null = null;
 
 export default definePlugin({
     name: "HeicToJpeg",
@@ -76,33 +72,38 @@ export default definePlugin({
 
     start() {
         try {
-            const CloudUpload = findLazy(m =>
-                m.prototype?.trackUploadFinished
-            ) as any;
+            origDispatch = FluxDispatcher.dispatch.bind(FluxDispatcher);
 
-            if (!CloudUpload?.prototype?.upload) {
-                console.warn("[HeicToJpeg] CloudUpload class not found");
-                return;
-            }
-
-            const orig = CloudUpload.prototype.upload;
-
-            CloudUpload.prototype.upload = async function (...args: any[]) {
-                if (settings.store.convertOnUpload)
-                    await convert(this);
-                return orig.apply(this, args);
-            };
-
-            unpatch = () => {
-                CloudUpload.prototype.upload = orig;
+            FluxDispatcher.dispatch = function (action: any) {
+                if (
+                    settings.store.convertOnUpload &&
+                    action.type === UPLOAD &&
+                    action.files?.length
+                ) {
+                    const heic: File[] = [];
+                    const other: File[] = [];
+                    for (const f of action.files) {
+                        (isHeic(f.type, f.name) ? heic : other).push(f);
+                    }
+                    if (other.length) origDispatch!({ ...action, files: other });
+                    if (heic.length) {
+                        convertFiles(heic).then(converted =>
+                            origDispatch!({ ...action, files: converted })
+                        );
+                    }
+                    return;
+                }
+                return origDispatch!(action);
             };
         } catch (e) {
-            console.warn("[HeicToJpeg] Failed to patch CloudUpload", e);
+            console.warn("[HeicToJpeg] Failed to intercept dispatch", e);
         }
     },
 
     stop() {
-        unpatch?.();
-        unpatch = null;
+        if (origDispatch) {
+            FluxDispatcher.dispatch = origDispatch;
+            origDispatch = null;
+        }
     },
 });
