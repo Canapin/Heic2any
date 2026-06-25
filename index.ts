@@ -65,20 +65,11 @@ async function convertItems(items: any[]): Promise<any[]> {
 
 const UPLOAD = "UPLOAD_ATTACHMENT_ADD_FILES";
 let origDispatch: ((action: any) => void) | null = null;
+let converting = false;
+let queueItems: any[] = [];
+let queueAction: any = null;
 
-let batchTimer: ReturnType<typeof setTimeout> | null = null;
-let batchItems: any[] = [];
-let batchAction: any = null;
-
-function flushBatch() {
-    const items = batchItems;
-    const action = batchAction;
-    batchTimer = null;
-    batchItems = [];
-    batchAction = null;
-
-    if (!items.length) return;
-
+function doConvert(items: any[], action: any) {
     const count = items.length;
     const msg = `Converting ${count} HEIC file${count > 1 ? "s" : ""} to JPEG\u2026`;
     const opts = { position: Toasts.Position.BOTTOM };
@@ -89,12 +80,26 @@ function flushBatch() {
 
     convertItems(items).then(converted => {
         done = true;
+        converting = false;
         origDispatch!({ ...action, files: converted });
+        drainQueue();
     }, () => {
         done = true;
+        converting = false;
         showToast("HEIC conversion failed", Toasts.Type.FAILURE, opts);
         origDispatch!({ ...action, files: items });
+        drainQueue();
     });
+}
+
+function drainQueue() {
+    if (!queueItems.length) return;
+    const items = queueItems;
+    const action = queueAction;
+    queueItems = [];
+    queueAction = null;
+    converting = true;
+    doConvert(items, action);
 }
 
 export default definePlugin({
@@ -122,10 +127,13 @@ export default definePlugin({
                     }
                     if (other.length) origDispatch!({ ...action, files: other });
                     if (heic.length) {
-                        batchItems.push(...heic);
-                        batchAction ??= action;
-                        if (batchTimer) clearTimeout(batchTimer);
-                        batchTimer = setTimeout(flushBatch, 100);
+                        if (converting) {
+                            queueItems.push(...heic);
+                            queueAction ??= action;
+                        } else {
+                            converting = true;
+                            doConvert(heic, action);
+                        }
                     }
                     return;
                 }
