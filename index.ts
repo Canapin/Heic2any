@@ -71,6 +71,8 @@ let queueAction: any = null;
 
 function doConvert(items: any[], action: any) {
     const count = items.length;
+    const names = items.map((i: any) => (i?.file ?? i).name);
+    console.log("[HeicToJpeg:D] doConvert start count:", count, "names:", names);
     const msg = `Converting ${count} HEIC file${count > 1 ? "s" : ""} to JPEG\u2026`;
     const opts = { position: Toasts.Position.BOTTOM };
     showToast(msg, Toasts.Type.MESSAGE, opts);
@@ -79,11 +81,13 @@ function doConvert(items: any[], action: any) {
     setTimeout(() => { if (!done) showToast(msg, Toasts.Type.MESSAGE, opts); }, 4000);
 
     convertItems(items).then(converted => {
+        console.log("[HeicToJpeg:D] doConvert done, converted:", converted.map((c: any) => (c?.file ?? c).name));
         done = true;
         converting = false;
         origDispatch!({ ...action, files: converted });
         drainQueue();
     }, () => {
+        console.log("[HeicToJpeg:D] doConvert failed");
         done = true;
         converting = false;
         showToast("HEIC conversion failed", Toasts.Type.FAILURE, opts);
@@ -93,7 +97,8 @@ function doConvert(items: any[], action: any) {
 }
 
 function drainQueue() {
-    if (!queueItems.length) return;
+    if (!queueItems.length) return console.log("[HeicToJpeg:D] drainQueue nothing queued");
+    console.log("[HeicToJpeg:D] drainQueue processing", queueItems.length, "queued items");
     const items = queueItems;
     const action = queueAction;
     queueItems = [];
@@ -118,19 +123,25 @@ export default definePlugin({
                     action.type === UPLOAD &&
                     action.files?.length
                 ) {
+                    console.log("[HeicToJpeg:D] dispatch caught, files:", action.files.length);
                     const heic: any[] = [];
                     const other: any[] = [];
                     for (const f of action.files) {
                         const file = f?.file ?? f;
-                        if (!(file instanceof File)) { other.push(f); continue; }
+                        const isFile = file instanceof File;
+                        console.log("[HeicToJpeg:D]   item", isFile ? `File name="${file.name}" type="${file.type}"` : typeof file, "isHeic:", isFile && isHeic(file.type, file.name));
+                        if (!isFile) { other.push(f); continue; }
                         (isHeic(file.type, file.name) ? heic : other).push(f);
                     }
+                    console.log("[HeicToJpeg:D]   -> heic:", heic.length, "other:", other.length, "converting flag:", converting);
                     if (other.length) origDispatch!({ ...action, files: other });
                     if (heic.length) {
                         if (converting) {
+                            console.log("[HeicToJpeg:D]   -> queuing, queueItems now:", queueItems.length + heic.length);
                             queueItems.push(...heic);
                             queueAction ??= action;
                         } else {
+                            console.log("[HeicToJpeg:D]   -> starting conversion, names:", heic.map((h: any) => (h?.file ?? h).name));
                             converting = true;
                             doConvert(heic, action);
                         }
