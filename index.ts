@@ -16,11 +16,10 @@
  * along with this program.  If not, see <https://www.gnu.org/licenses/>.
 */
 
-import { showNotice, popNotice } from "@api/Notices";
 import { definePluginSettings } from "@api/Settings";
 import { Devs } from "@utils/constants";
 import definePlugin, { OptionType } from "@utils/types";
-import { FluxDispatcher } from "@webpack/common";
+import { FluxDispatcher, showToast, Toasts } from "@webpack/common";
 import heic2any from "heic2any";
 
 const settings = definePluginSettings({
@@ -93,15 +92,20 @@ export default definePlugin({
                     if (other.length) origDispatch!({ ...action, files: other });
                     if (heic.length) {
                         const count = heic.length;
-                        showNotice(
-                            `Converting ${count} HEIC file${count > 1 ? "s" : ""} to JPEG\u2026`,
-                            "...",
-                            () => {}
+                        showToast(`Converting ${count} HEIC file${count > 1 ? "s" : ""} to JPEG\u2026`, Toasts.Type.MESSAGE);
+                        const timer = setInterval(
+                            () => showToast("Converting\u2026", Toasts.Type.MESSAGE),
+                            2000
                         );
                         convertItems(heic).then(converted => {
-                            popNotice();
+                            clearInterval(timer);
+                            showToast("HEIC converted!", Toasts.Type.SUCCESS);
                             origDispatch!({ ...action, files: converted });
-                        }, () => popNotice());
+                        }, () => {
+                            clearInterval(timer);
+                            showToast("HEIC conversion failed", Toasts.Type.FAILURE);
+                            origDispatch!({ ...action, files: heic });
+                        });
                     }
                     return;
                 }
