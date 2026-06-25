@@ -19,7 +19,7 @@
 import { definePluginSettings } from "@api/Settings";
 import { Devs } from "@utils/constants";
 import definePlugin, { OptionType } from "@utils/types";
-import { CloudUpload } from "@vencord/discord-types";
+import { findLazy } from "@webpack";
 import heic2any from "heic2any";
 
 const settings = definePluginSettings({
@@ -45,44 +45,64 @@ function isHeic(mimeType: string, filename: string) {
     return dot !== -1 && HEIC_EXTS.has(filename.slice(dot).toLowerCase());
 }
 
+async function convert(upload: any) {
+    if (!isHeic(upload.mimeType, upload.filename)) return;
+
+    try {
+        const result = await heic2any({
+            blob: upload.item.file,
+            toType: "image/jpeg",
+        });
+
+        const jpegBlob = Array.isArray(result) ? result[0] : result;
+        const newName = upload.filename.replace(/\.(heic|heif|heics|heifs)$/i, ".jpg");
+        const jpegFile = new File([jpegBlob], newName, { type: "image/jpeg" });
+
+        upload.item.file = jpegFile;
+        upload.filename = newName;
+        upload.mimeType = "image/jpeg";
+    } catch (e) {
+        console.error("[HeicToJpeg] Failed to convert", upload.filename, e);
+    }
+}
+
+let unpatch: (() => void) | null = null;
+
 export default definePlugin({
     name: "HeicToJpeg",
     description: "Converts HEIC/HEIF images to JPEG on upload",
     authors: [Devs.Ven],
     settings,
 
-    patches: [
-        {
-            find: "async uploadFiles(",
-            replacement: {
-                match: /async uploadFiles\((\i)\){/,
-                replace: "async uploadFiles($1){await $self.convertHeicUploads($1);"
+    start() {
+        try {
+            const CloudUpload = findLazy(m =>
+                m.prototype?.trackUploadFinished
+            ) as any;
+
+            if (!CloudUpload?.prototype?.upload) {
+                console.warn("[HeicToJpeg] CloudUpload class not found");
+                return;
             }
-        },
-    ],
 
-    async convertHeicUploads(uploads: CloudUpload[]) {
-        if (!settings.store.convertOnUpload) return;
+            const orig = CloudUpload.prototype.upload;
 
-        for (const upload of uploads) {
-            if (!isHeic(upload.mimeType, upload.filename)) continue;
+            CloudUpload.prototype.upload = async function (...args: any[]) {
+                if (settings.store.convertOnUpload)
+                    await convert(this);
+                return orig.apply(this, args);
+            };
 
-            try {
-                const result = await heic2any({
-                    blob: upload.item.file,
-                    toType: "image/jpeg",
-                });
-
-                const jpegBlob = Array.isArray(result) ? result[0] : result;
-                const newName = upload.filename.replace(/\.(heic|heif|heics|heifs)$/i, ".jpg");
-                const jpegFile = new File([jpegBlob], newName, { type: "image/jpeg" });
-
-                upload.item.file = jpegFile;
-                upload.filename = newName;
-                upload.mimeType = "image/jpeg";
-            } catch (e) {
-                console.error("[HeicToJpeg] Failed to convert", upload.filename, e);
-            }
+            unpatch = () => {
+                CloudUpload.prototype.upload = orig;
+            };
+        } catch (e) {
+            console.warn("[HeicToJpeg] Failed to patch CloudUpload", e);
         }
-    }
+    },
+
+    stop() {
+        unpatch?.();
+        unpatch = null;
+    },
 });
