@@ -66,6 +66,37 @@ async function convertItems(items: any[]): Promise<any[]> {
 const UPLOAD = "UPLOAD_ATTACHMENT_ADD_FILES";
 let origDispatch: ((action: any) => void) | null = null;
 
+let batchTimer: ReturnType<typeof setTimeout> | null = null;
+let batchItems: any[] = [];
+let batchAction: any = null;
+
+function flushBatch() {
+    const items = batchItems;
+    const action = batchAction;
+    batchTimer = null;
+    batchItems = [];
+    batchAction = null;
+
+    if (!items.length) return;
+
+    const count = items.length;
+    const msg = `Converting ${count} HEIC file${count > 1 ? "s" : ""} to JPEG\u2026`;
+    const opts = { position: Toasts.Position.BOTTOM };
+    showToast(msg, Toasts.Type.MESSAGE, opts);
+
+    let done = false;
+    setTimeout(() => { if (!done) showToast(msg, Toasts.Type.MESSAGE, opts); }, 4000);
+
+    convertItems(items).then(converted => {
+        done = true;
+        origDispatch!({ ...action, files: converted });
+    }, () => {
+        done = true;
+        showToast("HEIC conversion failed", Toasts.Type.FAILURE, opts);
+        origDispatch!({ ...action, files: items });
+    });
+}
+
 export default definePlugin({
     name: "HeicToJpeg",
     description: "Converts HEIC/HEIF images to JPEG on upload",
@@ -91,22 +122,10 @@ export default definePlugin({
                     }
                     if (other.length) origDispatch!({ ...action, files: other });
                     if (heic.length) {
-                        const count = heic.length;
-                        const msg = `Converting ${count} HEIC file${count > 1 ? "s" : ""} to JPEG\u2026`;
-                        const opts = { position: Toasts.Position.BOTTOM };
-                        showToast(msg, Toasts.Type.MESSAGE, opts);
-                        let done = false;
-                        setTimeout(() => {
-                            if (!done) showToast(msg, Toasts.Type.MESSAGE, opts);
-                        }, 4000);
-                        convertItems(heic).then(converted => {
-                            done = true;
-                            origDispatch!({ ...action, files: converted });
-                        }, () => {
-                            done = true;
-                            showToast("HEIC conversion failed", Toasts.Type.FAILURE, opts);
-                            origDispatch!({ ...action, files: heic });
-                        });
+                        batchItems.push(...heic);
+                        batchAction ??= action;
+                        if (batchTimer) clearTimeout(batchTimer);
+                        batchTimer = setTimeout(flushBatch, 100);
                     }
                     return;
                 }
