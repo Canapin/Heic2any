@@ -101,7 +101,6 @@ export default definePlugin({
                         }, 4000);
                         convertItems(heic).then(converted => {
                             done = true;
-                            showToast("HEIC converted!", Toasts.Type.SUCCESS, opts);
                             origDispatch!({ ...action, files: converted });
                         }, () => {
                             done = true;
