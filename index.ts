@@ -77,18 +77,13 @@ function doConvert(items: any[], action: any) {
     const opts = { position: Toasts.Position.BOTTOM };
     showToast(msg, Toasts.Type.MESSAGE, opts);
 
-    let done = false;
-    setTimeout(() => { if (!done) showToast(msg, Toasts.Type.MESSAGE, opts); }, 4000);
-
     convertItems(items).then(converted => {
         console.log("[HeicToJpeg:D] doConvert done, converted:", converted.map((c: any) => (c?.file ?? c).name));
-        done = true;
         converting = false;
         origDispatch!({ ...action, files: converted });
         drainQueue();
     }, () => {
         console.log("[HeicToJpeg:D] doConvert failed");
-        done = true;
         converting = false;
         showToast("HEIC conversion failed", Toasts.Type.FAILURE, opts);
         origDispatch!({ ...action, files: items });
