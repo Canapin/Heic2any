@@ -92,18 +92,20 @@ export default definePlugin({
                     if (other.length) origDispatch!({ ...action, files: other });
                     if (heic.length) {
                         const count = heic.length;
-                        showToast(`Converting ${count} HEIC file${count > 1 ? "s" : ""} to JPEG\u2026`, Toasts.Type.MESSAGE);
-                        const timer = setInterval(
-                            () => showToast("Converting\u2026", Toasts.Type.MESSAGE),
-                            2000
-                        );
+                        const msg = `Converting ${count} HEIC file${count > 1 ? "s" : ""} to JPEG\u2026`;
+                        const opts = { position: Toasts.Position.BOTTOM };
+                        showToast(msg, Toasts.Type.MESSAGE, opts);
+                        let done = false;
+                        setTimeout(() => {
+                            if (!done) showToast(msg, Toasts.Type.MESSAGE, opts);
+                        }, 4000);
                         convertItems(heic).then(converted => {
-                            clearInterval(timer);
-                            showToast("HEIC converted!", Toasts.Type.SUCCESS);
+                            done = true;
+                            showToast("HEIC converted!", Toasts.Type.SUCCESS, opts);
                             origDispatch!({ ...action, files: converted });
                         }, () => {
-                            clearInterval(timer);
-                            showToast("HEIC conversion failed", Toasts.Type.FAILURE);
+                            done = true;
+                            showToast("HEIC conversion failed", Toasts.Type.FAILURE, opts);
                             origDispatch!({ ...action, files: heic });
                         });
                     }
