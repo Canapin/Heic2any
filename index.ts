@@ -19,8 +19,11 @@
 import { definePluginSettings } from "@api/Settings";
 import { Devs } from "@utils/constants";
 import definePlugin, { OptionType } from "@utils/types";
-import { FluxDispatcher, showToast, Toasts } from "@webpack/common";
-import heic2any from "heic2any";
+import { FluxDispatcher, showToast } from "@webpack/common";
+
+function getHeic2Any() {
+    return require("heic2any") as (options: { blob: Blob; toType: string; }) => Promise<Blob | Blob[]>;
+}
 
 const settings = definePluginSettings({
     convertOnUpload: {
@@ -51,7 +54,7 @@ async function convertItems(items: any[]): Promise<any[]> {
         if (!(file instanceof File) || !isHeic(file.type, file.name)) return item;
 
         try {
-            const result = await heic2any({ blob: file, toType: "image/jpeg" });
+            const result = await getHeic2Any()({ blob: file, toType: "image/jpeg" });
             const jpegBlob = Array.isArray(result) ? result[0] : result;
             const newName = file.name.replace(/\.(heic|heif|heics|heifs)$/i, ".jpg");
             const newFile = new File([jpegBlob], newName, { type: "image/jpeg" });
@@ -64,36 +67,30 @@ async function convertItems(items: any[]): Promise<any[]> {
 }
 
 const UPLOAD = "UPLOAD_ATTACHMENT_ADD_FILES";
-let origDispatch: ((action: any) => void) | null = null;
+let origDispatch: typeof FluxDispatcher.dispatch | null = null;
 let converting = false;
 let queueItems: any[] = [];
 let queueAction: any = null;
 
 function doConvert(items: any[], action: any) {
-    const count = items.length;
-    const names = items.map((i: any) => (i?.file ?? i).name);
-    console.log("[HeicToJpeg:D] doConvert start count:", count, "names:", names);
-    const msg = `Converting ${count} HEIC file${count > 1 ? "s" : ""} to JPEG\u2026`;
-    const opts = { position: Toasts.Position.BOTTOM };
-    showToast(msg, Toasts.Type.MESSAGE, opts);
+    const opts = { position: "bottom" as const };
+    showToast({ text: `Converting ${items.length} HEIC file${items.length > 1 ? "s" : ""} to JPEG…`, ...opts });
 
     convertItems(items).then(converted => {
-        console.log("[HeicToJpeg:D] doConvert done, converted:", converted.map((c: any) => (c?.file ?? c).name));
         converting = false;
-        origDispatch!({ ...action, files: converted });
+        void origDispatch!({ ...action, files: converted });
         drainQueue();
-    }, () => {
-        console.log("[HeicToJpeg:D] doConvert failed");
+    }, error => {
+        console.error("[HeicToJpeg] Failed to convert", error);
         converting = false;
-        showToast("HEIC conversion failed", Toasts.Type.FAILURE, opts);
-        origDispatch!({ ...action, files: items });
+        showToast({ text: "HEIC conversion failed", variant: "critical", ...opts });
+        void origDispatch!({ ...action, files: items });
         drainQueue();
     });
 }
 
 function drainQueue() {
-    if (!queueItems.length) return console.log("[HeicToJpeg:D] drainQueue nothing queued");
-    console.log("[HeicToJpeg:D] drainQueue processing", queueItems.length, "queued items");
+    if (!queueItems.length) return;
     const items = queueItems;
     const action = queueAction;
     queueItems = [];
@@ -112,7 +109,7 @@ export default definePlugin({
         try {
             origDispatch = FluxDispatcher.dispatch.bind(FluxDispatcher);
 
-            FluxDispatcher.dispatch = function (action: any) {
+            FluxDispatcher.dispatch = async function (action: any) {
                 if (
                     settings.store.convertOnUpload &&
                     action.type === UPLOAD &&
@@ -129,7 +126,7 @@ export default definePlugin({
                         (isHeic(file.type, file.name) ? heic : other).push(f);
                     }
                     console.log("[HeicToJpeg:D]   -> heic:", heic.length, "other:", other.length, "converting flag:", converting);
-                    if (other.length) origDispatch!({ ...action, files: other });
+                    if (other.length) await origDispatch!({ ...action, files: other });
                     if (heic.length) {
                         if (converting) {
                             console.log("[HeicToJpeg:D]   -> queuing, queueItems now:", queueItems.length + heic.length);
@@ -154,6 +151,9 @@ export default definePlugin({
         if (origDispatch) {
             FluxDispatcher.dispatch = origDispatch;
             origDispatch = null;
+            converting = false;
+            queueItems = [];
+            queueAction = null;
         }
     },
 });
